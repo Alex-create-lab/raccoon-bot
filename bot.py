@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
 from dotenv import load_dotenv
-from aiohttp import web  # Добавили для веб-сервера
+from aiohttp import web
 
 # Загружаем переменные из .env файла
 load_dotenv()
@@ -26,13 +26,19 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# --- ПАПКА С ГИФКАМИ ---
-# Для Render используем /tmp (можно писать)
-GIF_FOLDER = "/tmp/gifs"
+# --- ПУТЬ К ГИФКАМ (РАБОТАЕТ ВЕЗДЕ) ---
+# Определяем корневую папку проекта
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Папка с гифками находится здесь же
+GIF_FOLDER = os.path.join(BASE_DIR, "gifs")
+
+# Создаем папку если её нет
 os.makedirs(GIF_FOLDER, exist_ok=True)
 
+print(f"📁 Бот ищет гифки в: {GIF_FOLDER}")
+
 # --- БАЗА ДАННЫХ (SQLite) ---
-DB_PATH = "/tmp/raccoon_food.db"
+DB_PATH = os.path.join(BASE_DIR, "raccoon_food.db")
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''
@@ -97,7 +103,7 @@ def check_daily(user_id):
         return False, last
     return True, datetime.datetime.now()  # Первый раз
 
-# --- ФУНКЦИЯ ДЛЯ ОТПРАВКИ ГИФОК (безопасная) ---
+# --- ФУНКЦИЯ ДЛЯ ОТПРАВКИ ГИФОК ---
 async def send_raccoon_gif(message: types.Message, gif_name: str, caption: str = ""):
     """Отправляет гифку если файл существует"""
     gif_path = os.path.join(GIF_FOLDER, gif_name)
@@ -107,12 +113,14 @@ async def send_raccoon_gif(message: types.Message, gif_name: str, caption: str =
                 animation=FSInputFile(gif_path),
                 caption=caption
             )
+            print(f"✅ Отправил гифку: {gif_name}")
         except Exception as e:
-            print(f"Ошибка отправки гифки {gif_name}: {e}")
+            print(f"❌ Ошибка отправки гифки {gif_name}: {e}")
             await message.answer(caption)
     else:
+        print(f"❌ Гифка не найдена: {gif_path}")
         if caption:
-            await message.answer(caption)
+            await message.answer(caption + " (гифка потерялась, но енот тут)")
 
 # --- ТЕКСТЫ ---
 HAPPY_TEXTS = [
@@ -338,7 +346,12 @@ async def main():
     print(f"🚀 Енот-Тамагочи запущен!")
     print(f"📊 База данных: {DB_PATH}")
     print(f"📁 Папка с гифками: {GIF_FOLDER}")
-    print(f"✅ Токен загружен из {'файла .env' if os.path.exists('.env') else 'переменной окружения'}")
+    
+    # Проверяем наличие гифок
+    gif_files = os.listdir(GIF_FOLDER)
+    print(f"📸 Найдено гифок: {len(gif_files)}")
+    for gif in gif_files:
+        print(f"   - {gif}")
     
     await dp.start_polling(bot)
 
