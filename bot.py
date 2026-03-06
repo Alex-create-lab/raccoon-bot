@@ -4,6 +4,7 @@ import random
 import os
 import datetime
 import sqlite3
+import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
@@ -26,20 +27,38 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# --- ПУТЬ К ГИФКАМ (РАБОТАЕТ ВЕЗДЕ) ---
-# Определяем корневую папку проекта
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Папка с гифками находится здесь же
-GIF_FOLDER = os.path.join(BASE_DIR, "gifs")
-
-# Создаем папку если её нет
+# --- ПАПКА ДЛЯ ГИФОК ---
+GIF_FOLDER = "/tmp/gifs"  # на Render можно писать в /tmp
 os.makedirs(GIF_FOLDER, exist_ok=True)
 
-print(f"📁 Бот ищет гифки в: {GIF_FOLDER}")
+# --- ТВОИ ГИФКИ С POSTIMAGE ---
+GIF_URLS = {
+    'happy.gif': 'https://i.postimg.cc/N0VW2Yg5/happy.gif',
+    'hungry.gif': 'https://i.postimg.cc/MG4hfxWp/hungry.gif',
+    'eat.gif': 'https://i.postimg.cc/25JPLmzk/eat.gif',
+    'angry.gif': 'https://i.postimg.cc/CKtWnYFS/angry.gif',
+    'sleep.gif': 'https://i.postimg.cc/VNT301Y6/sleep.gif',
+    'dance.gif': 'https://i.postimg.cc/XvhTB3VV/dance.gif',
+    'sad.gif': 'https://i.postimg.cc/k5ZkR9n5/sad.gif'
+}
+
+# --- СКАЧИВАЕМ ГИФКИ ПРИ ЗАПУСКЕ ---
+print("🔄 Скачиваю гифки с PostImage...")
+for name, url in GIF_URLS.items():
+    gif_path = os.path.join(GIF_FOLDER, name)
+    try:
+        print(f"📥 {name}...", end="")
+        r = requests.get(url, timeout=10)
+        with open(gif_path, 'wb') as f:
+            f.write(r.content)
+        print(f" ✅ {len(r.content)} байт")
+    except Exception as e:
+        print(f" ❌ Ошибка: {e}")
+
+print(f"📁 Гифки сохранены в: {GIF_FOLDER}")
 
 # --- БАЗА ДАННЫХ (SQLite) ---
-DB_PATH = os.path.join(BASE_DIR, "raccoon_food.db")
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+conn = sqlite3.connect('raccoon_food.db', check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS hunger (
@@ -105,7 +124,7 @@ def check_daily(user_id):
 
 # --- ФУНКЦИЯ ДЛЯ ОТПРАВКИ ГИФОК ---
 async def send_raccoon_gif(message: types.Message, gif_name: str, caption: str = ""):
-    """Отправляет гифку если файл существует"""
+    """Отправляет гифку"""
     gif_path = os.path.join(GIF_FOLDER, gif_name)
     if os.path.exists(gif_path):
         try:
@@ -113,14 +132,12 @@ async def send_raccoon_gif(message: types.Message, gif_name: str, caption: str =
                 animation=FSInputFile(gif_path),
                 caption=caption
             )
-            print(f"✅ Отправил гифку: {gif_name}")
         except Exception as e:
-            print(f"❌ Ошибка отправки гифки {gif_name}: {e}")
+            print(f"Ошибка отправки гифки {gif_name}: {e}")
             await message.answer(caption)
     else:
         print(f"❌ Гифка не найдена: {gif_path}")
-        if caption:
-            await message.answer(caption + " (гифка потерялась, но енот тут)")
+        await message.answer(caption + "\n(енот здесь, но гифка потерялась)")
 
 # --- ТЕКСТЫ ---
 HAPPY_TEXTS = [
@@ -153,7 +170,6 @@ FULL_TEXTS = [
 async def cmd_start(message: types.Message):
     user_name = message.from_user.first_name
     
-    # Клавиатура
     kb = [
         [types.KeyboardButton(text="🍪 ПОКОРМИТЬ!"), types.KeyboardButton(text="📊 СТАТУС")],
         [types.KeyboardButton(text="🎨 НАРИСУЙ ЕНОТА"), types.KeyboardButton(text="😩 ПОЖАЛОВАТЬСЯ")],
@@ -177,7 +193,6 @@ async def cmd_feed(message: types.Message):
     user_id = message.from_user.id
     last_feed, hunger_level, streak, _ = get_hunger(user_id)
     
-    # Проверяем можно ли кормить (каждые 3 часа)
     if last_feed:
         last = datetime.datetime.fromisoformat(last_feed)
         hours_passed = (datetime.datetime.now() - last).total_seconds() / 3600
@@ -188,10 +203,8 @@ async def cmd_feed(message: types.Message):
             await send_raccoon_gif(message, "angry.gif", f"😤 Рано! Подожди {hours}ч {minutes}м!")
             return
     
-    # Кормим!
     new_hunger, new_streak = feed_raccoon(user_id)
     
-    # Выбираем реакцию
     if new_hunger >= 100:
         await send_raccoon_gif(message, "sleep.gif", random.choice(FULL_TEXTS))
     elif new_hunger >= 80:
@@ -209,9 +222,8 @@ async def cmd_daily(message: types.Message):
     can_daily, last_time = check_daily(user_id)
     
     if can_daily:
-        # Даём дейлик
         _, hunger_level, streak, _ = get_hunger(user_id)
-        new_hunger = min(100, hunger_level + 50)  # Дейлик даёт +50
+        new_hunger = min(100, hunger_level + 50)
         new_streak = streak + 1
         
         save_hunger(user_id, new_hunger, new_streak, last_daily=datetime.datetime.now().isoformat())
@@ -219,7 +231,6 @@ async def cmd_daily(message: types.Message):
         await send_raccoon_gif(message, "dance.gif", "🎉 УРА! ЕЖЕДНЕВНАЯ ПЕЧЕНЬКА! 🎉")
         await message.answer(f"🍪 Сытость: {new_hunger}% | Дней подряд: {new_streak}")
     else:
-        # Сколько осталось
         next_daily = last_time + datetime.timedelta(days=1)
         time_left = next_daily - datetime.datetime.now()
         hours = int(time_left.total_seconds() / 3600)
@@ -232,7 +243,6 @@ async def cmd_status(message: types.Message):
     user_id = message.from_user.id
     last_feed, hunger_level, streak, last_daily = get_hunger(user_id)
     
-    # Определяем статус
     if hunger_level >= 80:
         status = "💚 Сытый и довольный"
         gif = "happy.gif"
@@ -246,7 +256,6 @@ async def cmd_status(message: types.Message):
         status = "❤️‍🔥 СРОЧНО ПОКОРМИ!!!"
         gif = "angry.gif"
     
-    # Текст статуса
     text = f"📊 **СТАТУС ЕНОТА**\n\n"
     text += f"🦝 {status}\n"
     text += f"⚡️ Сытость: {hunger_level}%\n"
@@ -302,14 +311,12 @@ async def cmd_draw(message: types.Message):
 
 @dp.message()
 async def handle_all(message: types.Message):
-    """На любое сообщение"""
-    # Проверяем уровень голода и предупреждаем если надо
     user_id = message.from_user.id
     _, hunger_level, _, _ = get_hunger(user_id)
     
     if hunger_level < 20:
         await send_raccoon_gif(message, "angry.gif", "⚠️ ПОКОРМИ МЕНЯ СРОЧНО! ⚠️")
-    elif random.random() < 0.3:  # 30% случайных ответов
+    elif random.random() < 0.3:
         responses = [
             "🦝 *чешет пузико*",
             "🍪 Печеньку хочешь? А я хочу!",
@@ -320,39 +327,24 @@ async def handle_all(message: types.Message):
 
 # --- ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 async def handle_health(request):
-    """Проверка здоровья"""
     return web.Response(text="🦝 Енот работает!")
 
 async def run_web_server():
-    """Запуск веб-сервера"""
     app = web.Application()
     app.router.add_get('/', handle_health)
     app.router.add_get('/health', handle_health)
     
-    # Render задаёт порт через переменную окружения
     port = int(os.getenv('PORT', 10000))
-    
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"🌐 Веб-сервер запущен на порту {port}")
+    print(f"🌐 Веб-сервер на порту {port}")
 
 # --- ЗАПУСК ---
 async def main():
-    # Запускаем веб-сервер (нужно для Render)
     await run_web_server()
-    
-    print(f"🚀 Енот-Тамагочи запущен!")
-    print(f"📊 База данных: {DB_PATH}")
-    print(f"📁 Папка с гифками: {GIF_FOLDER}")
-    
-    # Проверяем наличие гифок
-    gif_files = os.listdir(GIF_FOLDER)
-    print(f"📸 Найдено гифок: {len(gif_files)}")
-    for gif in gif_files:
-        print(f"   - {gif}")
-    
+    print("🚀 Енот-Тамагочи с гифками с PostImage запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
